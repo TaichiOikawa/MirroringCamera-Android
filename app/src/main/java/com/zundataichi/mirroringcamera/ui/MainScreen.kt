@@ -489,8 +489,8 @@ private fun DeviceInfoDisplay(
     }
 
     val batteryColor = when {
-        batteryLevel <= 20 -> RecordingRed
-        batteryLevel <= 50 -> AccentYellow
+        batteryLevel <= 10 -> RecordingRed
+        batteryLevel <= 30 -> AccentYellow
         else -> ConnectionGreen
     }
 
