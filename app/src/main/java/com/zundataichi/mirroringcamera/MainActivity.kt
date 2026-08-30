@@ -31,10 +31,12 @@ import com.zundataichi.mirroringcamera.manager.CameraManager
 import com.zundataichi.mirroringcamera.manager.CaptureMode
 import com.zundataichi.mirroringcamera.manager.OrientationManager
 import com.zundataichi.mirroringcamera.manager.WebSocketManager
+import com.zundataichi.mirroringcamera.ui.AppUpdateDialog
 import com.zundataichi.mirroringcamera.ui.ExternalDisplayManager
 import com.zundataichi.mirroringcamera.ui.MainScreen
 import com.zundataichi.mirroringcamera.ui.SettingsScreen
 import com.zundataichi.mirroringcamera.ui.theme.MirroringCameraTheme
+import com.zundataichi.mirroringcamera.update.UpdateManager
 import com.zundataichi.mirroringcamera.util.VolumeButtonShutter
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var webRtcManager: com.zundataichi.mirroringcamera.manager.WebRtcManager
     private lateinit var orientationManager: OrientationManager
     private lateinit var externalDisplayManager: ExternalDisplayManager
+    private lateinit var updateManager: UpdateManager
     private val volumeButtonShutter = VolumeButtonShutter()
 
     private var showSettings by mutableStateOf(false)
@@ -83,6 +86,7 @@ class MainActivity : ComponentActivity() {
         settingsStore = app.settingsStore
         webSocketManager = app.webSocketManager
         webRtcManager = app.webRtcManager
+        updateManager = app.updateManager
 
         // Initialize activity-scoped managers
         cameraManager = CameraManager(this)
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
                 if (showSettings) {
                     SettingsScreen(
                         settingsStore = settingsStore,
+                        updateManager = updateManager,
                         connectionStatus = connectionStatus,
                         lastError = lastError,
                         onConnect = { webSocketManager.connect() },
@@ -177,6 +182,13 @@ class MainActivity : ComponentActivity() {
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+                }
+
+                // App update dialog。撮影中に割り込むと収録が止まるので、
+                // 録画・タイムラプスが動いている間は次の機会に回す。
+                val cameraState by cameraManager.state.collectAsState()
+                if (!cameraState.isRecording && !cameraState.isTimeLapseRunning) {
+                    AppUpdateDialog(updateManager = updateManager)
                 }
 
                 // Timelapse interval dialog

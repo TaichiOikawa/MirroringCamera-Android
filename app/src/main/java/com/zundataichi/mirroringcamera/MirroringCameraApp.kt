@@ -4,6 +4,7 @@ import android.app.Application
 import com.zundataichi.mirroringcamera.data.SettingsStore
 import com.zundataichi.mirroringcamera.manager.WebRtcManager
 import com.zundataichi.mirroringcamera.manager.WebSocketManager
+import com.zundataichi.mirroringcamera.update.UpdateManager
 
 class MirroringCameraApp : Application() {
 
@@ -14,6 +15,9 @@ class MirroringCameraApp : Application() {
         private set
 
     lateinit var webRtcManager: WebRtcManager
+        private set
+
+    lateinit var updateManager: UpdateManager
         private set
 
     /**
@@ -29,8 +33,12 @@ class MirroringCameraApp : Application() {
         settingsStore = SettingsStore(this)
         webSocketManager = WebSocketManager(this, settingsStore)
         webRtcManager = WebRtcManager(this)
+        updateManager = UpdateManager(this, settingsStore)
 
         wireSignaling()
+
+        // 起動時にアプリ更新を確認する（24時間に1回まで／失敗しても起動は妨げない）
+        updateManager.checkOnStartup()
     }
 
     /** Relay WebRTC signaling between the WebSocket and the peer connections. */

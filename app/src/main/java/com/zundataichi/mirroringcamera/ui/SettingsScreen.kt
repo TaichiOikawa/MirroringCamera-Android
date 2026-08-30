@@ -26,6 +26,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.zundataichi.mirroringcamera.data.SettingsStore
 import com.zundataichi.mirroringcamera.ui.components.ConnectionIndicator
 import com.zundataichi.mirroringcamera.ui.components.ConnectionStatus
+import com.zundataichi.mirroringcamera.update.UpdateManager
 import com.zundataichi.mirroringcamera.ui.theme.AccentYellow
 import com.zundataichi.mirroringcamera.ui.theme.ConnectionGreen
 import com.zundataichi.mirroringcamera.ui.theme.ConnectionOrange
@@ -57,6 +60,7 @@ import com.zundataichi.mirroringcamera.ui.theme.RecordingRed
 @Composable
 fun SettingsScreen(
     settingsStore: SettingsStore,
+    updateManager: UpdateManager,
     connectionStatus: ConnectionStatus,
     lastError: String?,
     onConnect: () -> Unit,
@@ -70,6 +74,18 @@ fun SettingsScreen(
     var urlInput by remember(apiBaseURL) { mutableStateOf(apiBaseURL) }
     var apiKeyInput by remember(apiKey) { mutableStateOf(apiKey) }
     var apiKeyVisible by remember { mutableStateOf(false) }
+    val autoUpdateCheckEnabled by settingsStore.autoUpdateCheckEnabled.collectAsState()
+    val updateState by updateManager.state.collectAsState()
+    val availableRelease by updateManager.availableRelease.collectAsState()
+
+    // 前回の確認結果（「最新です」やエラー）を持ち越さない。
+    // 取得中・インストール中は進行状況を消してしまうので触らない。
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val state = updateManager.state.value
+        if (state is UpdateManager.State.UpToDate || state is UpdateManager.State.Failed) {
+            updateManager.resetState()
+        }
+    }
 
     val context = LocalContext.current
     val batteryLevel = remember {
@@ -280,6 +296,75 @@ fun SettingsScreen(
             InfoRow("デバイス", "${Build.MANUFACTURER} ${Build.MODEL}")
             if (batteryLevel >= 0) {
                 InfoRow("バッテリー", "${batteryLevel}%")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- App Update Section ---
+            SectionHeader("アプリのアップデート")
+            Spacer(modifier = Modifier.height(6.dp))
+            InfoRow("バージョン", updateManager.versionName)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+            ) {
+                Text("起動時に自動で確認", color = Color.White, fontSize = 14.sp)
+                Switch(
+                    checked = autoUpdateCheckEnabled,
+                    onCheckedChange = { settingsStore.setAutoUpdateCheckEnabled(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = AccentYellow
+                    )
+                )
+            }
+
+            val isChecking = updateState is UpdateManager.State.Checking
+            // ダウンロードとインストールの進行はダイアログ側が出すので、ここでは押させない
+            val isUpdateBusy = isChecking ||
+                updateState is UpdateManager.State.Downloading ||
+                updateState is UpdateManager.State.Installing
+
+            Button(
+                onClick = { updateManager.startManualCheck() },
+                enabled = !isUpdateBusy,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentYellow),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+            ) {
+                Text(if (isChecking) "確認中..." else "アップデートを確認", color = Color.Black)
+            }
+
+            // 手動確認の結果。新しい版があるときはダイアログが出るので、ここは補足だけ。
+            when (val state = updateState) {
+                is UpdateManager.State.UpToDate -> Text(
+                    text = "最新のバージョンです",
+                    color = ConnectionGreen,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                is UpdateManager.State.Failed -> Text(
+                    text = "⚠ ${state.message}",
+                    color = RecordingRed,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                else -> availableRelease?.let { release ->
+                    Text(
+                        text = "バージョン ${release.versionName} が利用できます",
+                        color = AccentYellow,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

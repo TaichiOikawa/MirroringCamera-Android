@@ -24,6 +24,18 @@ class SettingsStore(private val context: Context) {
     private val _previewInterval = MutableStateFlow(prefs.getFloat(KEY_PREVIEW_INTERVAL, 1.0f).toDouble())
     val previewInterval: StateFlow<Double> = _previewInterval.asStateFlow()
 
+    private val _autoUpdateCheckEnabled =
+        MutableStateFlow(prefs.getBoolean(KEY_AUTO_UPDATE_CHECK, true))
+    val autoUpdateCheckEnabled: StateFlow<Boolean> = _autoUpdateCheckEnabled.asStateFlow()
+
+    /** 最後に GitHub へ更新を見に行った時刻（epoch ミリ秒）。0 なら未確認。 */
+    val lastUpdateCheckAt: Long
+        get() = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
+
+    /** 利用者が「このバージョンは要らない」と指定したタグ。無ければ null。 */
+    val skippedUpdateVersion: String?
+        get() = prefs.getString(KEY_SKIPPED_UPDATE_VERSION, null)
+
     fun setApiBaseURL(url: String) {
         val trimmed = url.trim().trimEnd('/')
         prefs.edit().putString(KEY_API_BASE_URL, trimmed).apply()
@@ -39,6 +51,19 @@ class SettingsStore(private val context: Context) {
     fun setPreviewInterval(interval: Double) {
         prefs.edit().putFloat(KEY_PREVIEW_INTERVAL, interval.toFloat()).apply()
         _previewInterval.value = interval
+    }
+
+    fun setAutoUpdateCheckEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_UPDATE_CHECK, enabled).apply()
+        _autoUpdateCheckEnabled.value = enabled
+    }
+
+    fun setLastUpdateCheckAt(timestampMillis: Long) {
+        prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, timestampMillis).apply()
+    }
+
+    fun setSkippedUpdateVersion(tagName: String?) {
+        prefs.edit().putString(KEY_SKIPPED_UPDATE_VERSION, tagName).apply()
     }
 
     /**
@@ -92,5 +117,8 @@ class SettingsStore(private val context: Context) {
         private const val KEY_API_KEY = "apiKey"
         private const val KEY_CAMERA_ID = "cameraID"
         private const val KEY_PREVIEW_INTERVAL = "previewInterval"
+        private const val KEY_AUTO_UPDATE_CHECK = "autoUpdateCheckEnabled"
+        private const val KEY_LAST_UPDATE_CHECK_AT = "lastUpdateCheckAt"
+        private const val KEY_SKIPPED_UPDATE_VERSION = "skippedUpdateVersion"
     }
 }
