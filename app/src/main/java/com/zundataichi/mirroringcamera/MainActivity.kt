@@ -31,9 +31,11 @@ import com.zundataichi.mirroringcamera.manager.CameraManager
 import com.zundataichi.mirroringcamera.manager.CaptureMode
 import com.zundataichi.mirroringcamera.manager.OrientationManager
 import com.zundataichi.mirroringcamera.manager.WebSocketManager
+import com.zundataichi.mirroringcamera.pairing.PairingCredentials
 import com.zundataichi.mirroringcamera.ui.AppUpdateDialog
 import com.zundataichi.mirroringcamera.ui.ExternalDisplayManager
 import com.zundataichi.mirroringcamera.ui.MainScreen
+import com.zundataichi.mirroringcamera.ui.QrScannerScreen
 import com.zundataichi.mirroringcamera.ui.SettingsScreen
 import com.zundataichi.mirroringcamera.ui.theme.MirroringCameraTheme
 import com.zundataichi.mirroringcamera.update.UpdateManager
@@ -54,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private val volumeButtonShutter = VolumeButtonShutter()
 
     private var showSettings by mutableStateOf(false)
+    private var showQrScanner by mutableStateOf(false)
     private var previewView: PreviewView? = null
 
     private var showTimeLapseIntervalDialog by mutableStateOf(false)
@@ -153,7 +156,14 @@ class MainActivity : ComponentActivity() {
                 val isExternalDisplayConnected by externalDisplayManager.isConnected.collectAsState()
                 val lastError by webSocketManager.lastError.collectAsState()
 
-                if (showSettings) {
+                if (showQrScanner) {
+                    QrScannerScreen(
+                        cameraId = settingsStore.cameraID.value,
+                        lifecycleOwner = this@MainActivity,
+                        onPaired = ::applyPairing,
+                        onDismiss = { showQrScanner = false },
+                    )
+                } else if (showSettings) {
                     SettingsScreen(
                         settingsStore = settingsStore,
                         updateManager = updateManager,
@@ -161,6 +171,7 @@ class MainActivity : ComponentActivity() {
                         lastError = lastError,
                         onConnect = { webSocketManager.connect() },
                         onDisconnect = { webSocketManager.disconnect() },
+                        onScanQrCode = { showQrScanner = true },
                         onDismiss = { showSettings = false },
                     )
                 } else {
@@ -241,6 +252,20 @@ class MainActivity : ComponentActivity() {
         val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (!cameraGranted) return
         cameraManager.startCamera(this, pv)
+    }
+
+    /**
+     * QR ペアリングで受け取った接続情報を保存し、そのまま接続し直す。
+     * 別のサーバー（や別の camera_id）に繋ぎ変わるので、既存の接続は必ず切る。
+     */
+    private fun applyPairing(credentials: PairingCredentials) {
+        webSocketManager.disconnect()
+        settingsStore.applyPairing(
+            serverUrl = credentials.serverUrl,
+            cameraId = credentials.cameraId,
+            apiKey = credentials.apiKey,
+        )
+        webSocketManager.connect()
     }
 
     private fun handleShutterAction() {

@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +66,7 @@ fun SettingsScreen(
     lastError: String?,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onScanQrCode: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val apiBaseURL by settingsStore.apiBaseURL.collectAsState()
@@ -125,6 +127,36 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            // --- QR pairing ---
+            // 手入力（URL + API Key）より先に出す。ふつうはこれだけで繋がる。
+            SectionHeader("かんたん接続")
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onScanQrCode,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentYellow),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Filled.QrCodeScanner,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("QR コードで接続", color = Color.Black)
+            }
+            Text(
+                text = "CameraController の管理画面に表示された QR コードを読み取ると、"
+                    + "URL と API Key が自動で設定されます",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+            Spacer(modifier = Modifier.height(16.dp))
+
             // --- API URL Section ---
             SectionHeader("CameraController API URL")
             Spacer(modifier = Modifier.height(8.dp))
