@@ -78,15 +78,22 @@ class CameraManager(private val context: Context) {
     private var recordingTimer: Timer? = null
     private var timeLapseTimer: Timer? = null
 
-    var onPreviewFrame: ((String) -> Unit)? = null
+    /** Raw camera frames for the WebRTC encoder. Convert synchronously; the proxy is closed after. */
+    var onFrameForWebRtc: ((ImageProxy) -> Unit)? = null
     var onTimeLapseProgress: ((Int) -> Unit)? = null
     var onShutterFlash: (() -> Unit)? = null
 
+    // --- JPEG preview fallback (used only when WebRTC cannot connect) ---
+    /** Whether to send periodic JPEG previews (true while WebRTC is unusable). */
+    var isFallbackActive: () -> Boolean = { false }
+    /** Fallback send interval in seconds (from SettingsStore.previewInterval). */
+    var fallbackIntervalProvider: () -> Double = { 1.0 }
+    /** Sends one base64-encoded JPEG frame to the server. */
+    var onFallbackPreview: ((String) -> Unit)? = null
+    private var lastPreviewSentAt = 0L
+
     // External display rendering
     var externalSurfaceHolder: android.view.SurfaceHolder? = null
-
-    private var lastPreviewSentTime = 0L
-    var previewIntervalMs: Long = 1000L
 
     fun startCamera(lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -121,7 +128,7 @@ class CameraManager(private val context: Context) {
 
         imageAnalysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setTargetAspectRatio(AspectRatio.RATIO_16_9)
+            .setTargetResolution(android.util.Size(1920, 1080))
             .build()
             .also { analysis ->
                 analysis.setAnalyzer(cameraExecutor) { imageProxy ->
@@ -334,26 +341,59 @@ class CameraManager(private val context: Context) {
 
     private fun processPreviewFrame(imageProxy: ImageProxy) {
         try {
-            val bitmap = imageProxyToBitmap(imageProxy)
-            if (bitmap != null) {
-                // Draw to external display every frame
-                drawToExternalDisplay(bitmap)
+            // Feed the WebRTC encoder first: imageProxyToBitmap() consumes the plane buffers.
+            onFrameForWebRtc?.invoke(imageProxy)
 
-                // Send to WebSocket at configured interval
-                val now = System.currentTimeMillis()
-                if (now - lastPreviewSentTime >= previewIntervalMs) {
-                    lastPreviewSentTime = now
-                    val out = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 30, out)
-                    val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-                    onPreviewFrame?.invoke(base64)
+            val needsExternal = externalSurfaceHolder != null
+            val now = System.currentTimeMillis()
+            val intervalMs = (fallbackIntervalProvider() * 1000).toLong()
+            val needsFallback = isFallbackActive() && now - lastPreviewSentAt >= intervalMs
+
+            // imageProxyToBitmap() consumes the plane buffers, so build the bitmap
+            // at most once and share it between the external display and fallback.
+            if (needsExternal || needsFallback) {
+                val bitmap = imageProxyToBitmap(imageProxy)
+                if (bitmap != null) {
+                    if (needsExternal) {
+                        drawToExternalDisplay(bitmap)
+                    }
+                    if (needsFallback) {
+                        lastPreviewSentAt = now
+                        sendFallbackPreview(bitmap)
+                    }
+                    bitmap.recycle()
                 }
-                bitmap.recycle()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Preview frame processing failed", e)
         } finally {
             imageProxy.close()
+        }
+    }
+
+    /** Downscale + low-quality JPEG-encode a frame and hand it to [onFallbackPreview] as base64. */
+    private fun sendFallbackPreview(bitmap: Bitmap) {
+        val callback = onFallbackPreview ?: return
+        try {
+            val maxDim = 640
+            val longest = maxOf(bitmap.width, bitmap.height)
+            val scale = if (longest > maxDim) maxDim.toFloat() / longest else 1f
+            val scaled = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt(),
+                    (bitmap.height * scale).toInt(),
+                    true,
+                )
+            } else {
+                bitmap
+            }
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 30, out)
+            if (scaled !== bitmap) scaled.recycle()
+            callback(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP))
+        } catch (e: Exception) {
+            Log.e(TAG, "Fallback preview encode failed", e)
         }
     }
 

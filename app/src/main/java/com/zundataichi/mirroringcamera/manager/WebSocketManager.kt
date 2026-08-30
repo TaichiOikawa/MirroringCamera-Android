@@ -23,8 +23,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -70,6 +74,15 @@ class WebSocketManager(
 
     var onCommandReceived: ((command: String, requestId: String, params: JsonObject?) -> Unit)? = null
 
+    // WebRTC signaling relayed from the server (see docs/api.md §2-4).
+    var onRtcSubscribe: ((controlId: String, sessionId: String) -> Unit)? = null
+    var onRtcAnswer: ((sessionId: String, sdp: String) -> Unit)? = null
+    var onRtcIce: ((sessionId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String) -> Unit)? = null
+    var onRtcUnsubscribe: ((sessionId: String) -> Unit)? = null
+    var onRtcControlGone: ((controlId: String) -> Unit)? = null
+    /** Invoked when the signaling socket drops; stale PeerConnections should be freed. */
+    var onSignalingClosed: (() -> Unit)? = null
+
     fun connect() {
         if (_connectionStatus.value == ConnectionStatus.CONNECTED ||
             _connectionStatus.value == ConnectionStatus.CONNECTING) return
@@ -98,6 +111,7 @@ class WebSocketManager(
         webSocket = null
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
         _isAtemActive.value = false
+        onSignalingClosed?.invoke()
     }
 
     private suspend fun registerCamera(restUrl: String) {
@@ -169,6 +183,7 @@ class WebSocketManager(
         stopStatusTimer()
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
         _isAtemActive.value = false
+        onSignalingClosed?.invoke()
 
         if (isIntentionalDisconnect) return
 
@@ -219,14 +234,52 @@ class WebSocketManager(
         webSocket?.send(json)
     }
 
-    fun sendPreview(base64Image: String) {
+    /**
+     * Send a low-quality JPEG preview frame (base64) as the WebRTC fallback.
+     * Only used while WebRTC cannot connect; see CameraController/docs/api.md
+     * `preview`.
+     */
+    fun sendPreview(imageBase64: String) {
         if (_connectionStatus.value != ConnectionStatus.CONNECTED) return
-
         val json = buildJsonObject {
             put("type", "preview")
-            put("image_base64", base64Image)
+            put("image_base64", imageBase64)
         }.toString()
+        webSocket?.send(json)
+    }
 
+    // --- WebRTC signaling (camera -> server) ---
+
+    fun sendRtcOffer(controlId: String, sessionId: String, sdp: String) {
+        val json = buildJsonObject {
+            put("type", "rtc_offer")
+            put("control_id", controlId)
+            put("session_id", sessionId)
+            put("sdp", sdp)
+        }.toString()
+        webSocket?.send(json)
+    }
+
+    fun sendRtcIce(controlId: String, sessionId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String) {
+        val json = buildJsonObject {
+            put("type", "rtc_ice")
+            put("control_id", controlId)
+            put("session_id", sessionId)
+            putJsonObject("candidate") {
+                put("candidate", candidate)
+                put("sdpMid", sdpMid)
+                put("sdpMLineIndex", sdpMLineIndex)
+            }
+        }.toString()
+        webSocket?.send(json)
+    }
+
+    fun sendRtcClose(controlId: String, sessionId: String) {
+        val json = buildJsonObject {
+            put("type", "rtc_close")
+            put("control_id", controlId)
+            put("session_id", sessionId)
+        }.toString()
         webSocket?.send(json)
     }
 
@@ -277,6 +330,32 @@ class WebSocketManager(
                         json["is_active"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
                     }
                     _isAtemActive.value = isActive
+                }
+                "rtc_subscribe" -> {
+                    val controlId = json["control_id"]?.jsonPrimitive?.content ?: return
+                    val sessionId = json["session_id"]?.jsonPrimitive?.content ?: return
+                    onRtcSubscribe?.invoke(controlId, sessionId)
+                }
+                "rtc_answer" -> {
+                    val sessionId = json["session_id"]?.jsonPrimitive?.content ?: return
+                    val sdp = json["sdp"]?.jsonPrimitive?.content ?: return
+                    onRtcAnswer?.invoke(sessionId, sdp)
+                }
+                "rtc_ice" -> {
+                    val sessionId = json["session_id"]?.jsonPrimitive?.content ?: return
+                    val cand = json["candidate"]?.jsonObject ?: return
+                    val candidate = cand["candidate"]?.jsonPrimitive?.contentOrNull ?: return
+                    val sdpMid = cand["sdpMid"]?.jsonPrimitive?.contentOrNull
+                    val sdpMLineIndex = cand["sdpMLineIndex"]?.jsonPrimitive?.intOrNull ?: 0
+                    onRtcIce?.invoke(sessionId, sdpMid, sdpMLineIndex, candidate)
+                }
+                "rtc_unsubscribe" -> {
+                    val sessionId = json["session_id"]?.jsonPrimitive?.content ?: return
+                    onRtcUnsubscribe?.invoke(sessionId)
+                }
+                "rtc_control_gone" -> {
+                    val controlId = json["control_id"]?.jsonPrimitive?.content ?: return
+                    onRtcControlGone?.invoke(controlId)
                 }
             }
         } catch (e: Exception) {

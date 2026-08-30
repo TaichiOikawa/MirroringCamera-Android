@@ -243,7 +243,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // --- Preview Section ---
-            SectionHeader("プレビュー送信")
+            SectionHeader("プレビュー送信（WebRTC不通時）")
             Spacer(modifier = Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("送信間隔", color = Color.White, fontSize = 14.sp)

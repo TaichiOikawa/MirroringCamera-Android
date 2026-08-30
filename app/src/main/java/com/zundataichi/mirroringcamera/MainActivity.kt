@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var settingsStore: SettingsStore
     private lateinit var cameraManager: CameraManager
     private lateinit var webSocketManager: WebSocketManager
+    private lateinit var webRtcManager: com.zundataichi.mirroringcamera.manager.WebRtcManager
     private lateinit var orientationManager: OrientationManager
     private lateinit var externalDisplayManager: ExternalDisplayManager
     private val volumeButtonShutter = VolumeButtonShutter()
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
         val app = application as MirroringCameraApp
         settingsStore = app.settingsStore
         webSocketManager = app.webSocketManager
+        webRtcManager = app.webRtcManager
 
         // Initialize activity-scoped managers
         cameraManager = CameraManager(this)
@@ -95,9 +97,16 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { handleCommand(command, requestId, params) }
         }
 
-        // Connect preview frames to WebSocket
-        cameraManager.onPreviewFrame = { base64 ->
-            webSocketManager.sendPreview(base64)
+        // Feed camera frames to the WebRTC encoder
+        cameraManager.onFrameForWebRtc = { imageProxy ->
+            webRtcManager.pushFrame(imageProxy)
+        }
+
+        // JPEG fallback: send periodic preview frames only while WebRTC is down.
+        cameraManager.isFallbackActive = { app.webRtcFallbackActive }
+        cameraManager.fallbackIntervalProvider = { settingsStore.previewInterval.value }
+        cameraManager.onFallbackPreview = { imageBase64 ->
+            webSocketManager.sendPreview(imageBase64)
         }
 
         // Connect timelapse progress to WebSocket
@@ -110,15 +119,6 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 cameraManager.state.collect { state ->
                     webSocketManager.updateCameraState(state)
-                }
-            }
-        }
-
-        // Sync preview interval
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                settingsStore.previewInterval.collect { interval ->
-                    cameraManager.previewIntervalMs = (interval * 1000).toLong()
                 }
             }
         }
@@ -200,6 +200,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Stop pushing frames; the WebRtcManager is app-scoped and survives this Activity.
+        cameraManager.onFrameForWebRtc = null
         cameraManager.shutdown()
         externalDisplayManager.stop()
     }
