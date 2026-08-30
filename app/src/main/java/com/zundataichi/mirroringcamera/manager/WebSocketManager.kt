@@ -70,6 +70,15 @@ class WebSocketManager(
     private var reconnectAttempts = 0
     private var isIntentionalDisconnect = false
 
+    /**
+     * ソケットを開くたびに増える世代番号。
+     *
+     * close() は非同期なので、切断して即座に繋ぎ直すと（QR ペアリングで接続先が
+     * 変わったときなど）古いソケットの onClosed が新しい接続の最中に届く。
+     * 世代が違うコールバックは、もう誰も見ていないソケットからのものとして捨てる。
+     */
+    private var connectionGeneration = 0
+
     private val scope = CoroutineScope(Dispatchers.IO + Job())
 
     var onCommandReceived: ((command: String, requestId: String, params: JsonObject?) -> Unit)? = null
@@ -106,6 +115,7 @@ class WebSocketManager(
 
     fun disconnect() {
         isIntentionalDisconnect = true
+        connectionGeneration++
         stopStatusTimer()
         webSocket?.close(1000, "User disconnect")
         webSocket = null
@@ -147,9 +157,18 @@ class WebSocketManager(
         if (wsUrl.isBlank()) return
 
         val request = Request.Builder().url(wsUrl).build()
+        val generation = ++connectionGeneration
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            /** この listener のソケットがまだ現役か。 */
+            private fun isCurrent() = generation == connectionGeneration
+
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (!isCurrent()) {
+                    // 開くのを待っている間に繋ぎ直された。掴んだままにしない。
+                    webSocket.close(1000, "Superseded")
+                    return
+                }
                 Log.d(TAG, "WebSocket connected")
                 _connectionStatus.value = ConnectionStatus.CONNECTED
                 _lastError.value = null
@@ -159,6 +178,7 @@ class WebSocketManager(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isCurrent()) return
                 handleMessage(text)
             }
 
@@ -168,11 +188,13 @@ class WebSocketManager(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closed: $code $reason")
+                if (!isCurrent()) return
                 handleDisconnection()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket failure: ${t.message}")
+                if (!isCurrent()) return
                 _lastError.value = t.message
                 handleDisconnection()
             }

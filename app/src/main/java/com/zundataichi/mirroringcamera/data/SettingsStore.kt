@@ -48,6 +48,28 @@ class SettingsStore(private val context: Context) {
         _apiKey.value = trimmed
     }
 
+    /**
+     * QR ペアリングで受け取った接続情報をまとめて保存する。
+     *
+     * URL・カメラID・API Key は 3 つで 1 組なので、1 つずつ書いて途中で
+     * ちぐはぐな組み合わせが見えないよう、まとめて書き込む。
+     */
+    fun applyPairing(serverUrl: String, cameraId: String, apiKey: String) {
+        val normalizedUrl = serverUrl.trim().trimEnd('/')
+        val normalizedCameraId = cameraId.trim()
+        val normalizedKey = apiKey.trim()
+
+        prefs.edit()
+            .putString(KEY_API_BASE_URL, normalizedUrl)
+            .putString(KEY_CAMERA_ID, normalizedCameraId)
+            .putString(KEY_API_KEY, normalizedKey)
+            .apply()
+
+        _apiBaseURL.value = normalizedUrl
+        _cameraID.value = normalizedCameraId
+        _apiKey.value = normalizedKey
+    }
+
     fun setPreviewInterval(interval: Double) {
         prefs.edit().putFloat(KEY_PREVIEW_INTERVAL, interval.toFloat()).apply()
         _previewInterval.value = interval

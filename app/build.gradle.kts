@@ -129,6 +129,9 @@ dependencies {
     // WebRTC (real-time preview)
     implementation(libs.stream.webrtc.android)
 
+    // QR code decoding ("QR コードで接続")
+    implementation(libs.zxing.core)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
